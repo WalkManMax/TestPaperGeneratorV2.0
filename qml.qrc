@@ -1,0 +1,16 @@
+<RCC>
+    <qresource prefix="/">
+        <file>main.qml</file>
+        <file>qtquickcontrols2.conf</file>
+        <file>DashLineH.qml</file>
+        <file>DashLineHShape.qml</file>
+        <file>Fonts/fa-brands-400-6.5.1.ttf</file>
+        <file>Fonts/fa-regular-400-6.5.1.ttf</file>
+        <file>Fonts/fa-solid-900--6.5.1.ttf</file>
+        <file>Fonts/Fonts.qml</file>
+        <file>Fonts/qmldir</file>
+        <file>MessageBox.qml</file>
+        <file>PageSetting.qml</file>
+        <file>EditableComboBox.qml</file>
+    </qresource>
+</RCC>
