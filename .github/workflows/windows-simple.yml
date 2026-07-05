@@ -1,4 +1,4 @@
-name: Windows Build (Simple)
+name: Windows Build (MSYS2 Qt5)
 
 on:
   push:
@@ -7,48 +7,51 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2019
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Test shell
+      - name: Install Qt5 via MSYS2
         run: |
-          Write-Host "Test step 1"
-          Write-Host "PATH=$env:PATH"
+          C:\tools\msys64\usr\bin\bash -lc "pacman -Sy --noconfirm mingw-w64-x86_64-qt5-base mingw-w64-x86_64-qt5-quickcontrols mingw-w64-x86_64-qt5-tools mingw-w64-x86_64-make"
 
-      - name: Install Python
-        run: choco install python -y --no-progress
-
-      - name: Verify Python
-        run: python --version
-
-      - name: Install aqtinstall
-        run: pip install aqtinstall
-
-      - name: Try Qt 5.15.8 mingw81
-        run: aqt install-qt windows desktop 5.15.8 win64_mingw81 -O C:\Qt || echo "mingw81 failed"
-
-      - name: Try Qt 5.15.8 MSVC2019
-        if: always()
-        run: aqt install-qt windows desktop 5.15.8 win64_msvc2019_64 -O C:\Qt || echo "msvc2019 failed"
-
-      - name: Find Qt directory
+      - name: Verify Qt installation
         run: |
-          $qtDir = Get-ChildItem "C:\Qt\5.15.*" -Directory | Where-Object { $_.Name -match 'mingw|msvc' } | Select-Object -First 1
-          if ($qtDir) {
-            Write-Host "Found Qt: $($qtDir.FullName)"
-          } else {
-            Write-Host "No Qt found!"
-            exit 1
+          C:\tools\msys64\usr\bin\bash -lc "qmake --version && gcc --version"
+
+      - name: Setup library files
+        run: |
+          New-Item -ItemType Directory -Force -Path "libxl\include_cpp" | Out-Null
+          New-Item -ItemType Directory -Force -Path "libxl\lib64" | Out-Null
+          # Copy headers
+          Get-ChildItem "libxl" -Recurse -Filter "*.h" | ForEach-Object {
+            $dest = "libxl\include_cpp\$($_.Name)"
+            if (-not (Test-Path $dest)) { Copy-Item $_.FullName "libxl\include_cpp\" -Force }
           }
+          # Copy libs
+          if ((Test-Path "libxl\lib\libxl.lib") -and -not (Test-Path "libxl\lib64\libxl.lib")) {
+            Copy-Item "libxl\lib\libxl.lib" "libxl\lib64\libxl.lib" -Force
+          }
+          if ((Test-Path "libxl\bin\libxl.dll") -and -not (Test-Path "libxl\lib64\libxl.dll")) {
+            Copy-Item "libxl\bin\libxl.dll" "libxl\lib64\libxl.dll" -Force
+          }
+          Write-Host "libxl contents:"
+          Get-ChildItem "libxl" -Recurse -File | Select-Object FullName
 
-      - name: Build
+      - name: Build with qmake
         run: |
-          $qtDir = Get-ChildItem "C:\Qt\5.15.*" -Directory | Where-Object { $_.Name -match 'mingw|msvc' } | Select-Object -First 1 | ForEach-Object { $_.FullName }
-          $env:QtDir = $qtDir
-          $env:PATH = "$qtDir\bin;$env:PATH"
-          $env:QTDIR = $qtDir
-          Write-Host "Using Qt: $qtDir"
-          qmake --version
-          gcc --version || echo "No gcc (MSVC mode)"
+          C:\tools\msys64\usr\bin\bash -lc "cd /d/a/TestPaperGeneratorV2.0/TestPaperGeneratorV2.0 && qmake TestPaperDemo1.pro -spec win32-g++ 'CONFIG+=release'"
+          C:\tools\msys64\usr\bin\bash -lc "cd /d/a/TestPaperGeneratorV2.0/TestPaperGeneratorV2.0 && mingw32-make -j4"
+
+      - name: Copy runtime DLLs
+        run: |
+          C:\tools\msys64\usr\bin\bash -lc "cd /d/a/TestPaperGeneratorV2.0/TestPaperGeneratorV2.0 && mkdir -p release/plugins && cp mingw64/bin/libgcc_s_seh-1.dll mingw64/bin/libstdc++-6.dll mingw64/bin/libwinpthread-1.dll release/ 2>/dev/null; cp mingw64/bin/Qt5*.dll release/ 2>/dev/null; cp libxl/lib64/libxl.dll release/ 2>/dev/null; cp -r mingw64/plugins/platforms release/plugins/ 2>/dev/null; cp -r mingw64/plugins/controls release/plugins/ 2>/dev/null; cp -r mingw64/plugins/layouts release/plugins/ 2>/dev/null; ls -la release/"
+          Get-ChildItem "release" -Recurse | Select-Object FullName
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestPaperGenerator-Windows
+          path: release/*.exe
+          retention-days: 30
