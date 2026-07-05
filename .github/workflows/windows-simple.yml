@@ -26,26 +26,29 @@ jobs:
       - name: Install aqtinstall
         run: pip install aqtinstall
 
-      - name: Install Qt via Chocolatey
-        run: choco install qt5-sdk -y --no-progress
+      - name: Try Qt 5.15.8 mingw81
+        run: aqt install-qt windows desktop 5.15.8 win64_mingw81 -O C:\Qt || echo "mingw81 failed"
 
-      - name: Find Qt path
+      - name: Try Qt 5.15.8 MSVC2019
+        if: always()
+        run: aqt install-qt windows desktop 5.15.8 win64_msvc2019_64 -O C:\Qt || echo "msvc2019 failed"
+
+      - name: Find Qt directory
         run: |
-          Get-ChildItem -Path "C:\ProgramData\Chocolatey\lib" -Filter "Qt*" -Recurse -Directory | Select-Object -First 5
-          Get-ChildItem -Path "C:\" -Filter "Qt" -Directory | Select-Object -First 3
+          $qtDir = Get-ChildItem "C:\Qt\5.15.*" -Directory | Where-Object { $_.Name -match 'mingw|msvc' } | Select-Object -First 1
+          if ($qtDir) {
+            Write-Host "Found Qt: $($qtDir.FullName)"
+          } else {
+            Write-Host "No Qt found!"
+            exit 1
+          }
 
       - name: Build
         run: |
-          $qtPath = "C:\Qt\5.15.9\mingw81_64"
-          if (-not (Test-Path $qtPath)) {
-            $qtPath = "C:\Qt\5.15.8\mingw81_64"
-          }
-          if (-not (Test-Path $qtPath)) {
-            $qtPath = Get-ChildItem "C:\Qt\5.*" -Directory | Select-Object -First 1 | ForEach-Object { $_.FullName }
-          }
-          $env:QtDir = $qtPath
-          $env:PATH = "$qtPath\bin;$env:PATH"
-          $env:QTDIR = $qtPath
-          Write-Host "Using Qt from: $qtPath"
+          $qtDir = Get-ChildItem "C:\Qt\5.15.*" -Directory | Where-Object { $_.Name -match 'mingw|msvc' } | Select-Object -First 1 | ForEach-Object { $_.FullName }
+          $env:QtDir = $qtDir
+          $env:PATH = "$qtDir\bin;$env:PATH"
+          $env:QTDIR = $qtDir
+          Write-Host "Using Qt: $qtDir"
           qmake --version
-          gcc --version
+          gcc --version || echo "No gcc (MSVC mode)"
