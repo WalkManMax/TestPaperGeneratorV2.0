@@ -1,7 +1,6 @@
 name: Build Windows Executable
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
 
@@ -16,39 +15,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Qt
-        uses: jurplel/qt-action@v3
-        with:
-          version: '5.15.2'
-          dir: 'C:\Qt'
-          modules: 'qtquick2 qtquickcontrols2'
-          tools: 'qt.tools.mingw730'
-
-      - name: Setup MinGW
-        shell: pwsh
+      - name: Install Qt5 via chocolatey
         run: |
-          $env:PATH = "C:\Qt\Tools\mingw730_64\bin;C:\Qt\5.15.2\mingw73_64\bin;$env:PATH"
-          $env:QTDIR = "C:\Qt\5.15.2\mingw73_64"
+          choco install qt5 -y --no-progress
+          refreshenv
+
+      - name: Setup MinGW environment
+        run: |
+          $qtDir = "C:\tools\qt\Qt5.15.2\5.15.2\mingw73_64"
+          $mingwDir = "C:\tools\mingw\mingw64\bin"
+          $env:PATH = "$qtDir\bin;$mingwDir;$env:PATH"
+          $env:QTDIR = $qtDir
           $env:PATH = "$env:QTDIR\bin;" + $env:PATH
+          Write-Host "PATH=$env:PATH"
           gcc --version
 
-      - name: Create libxl placeholders
-        shell: pwsh
+      - name: Create libxl directories
         run: |
-          New-Item -ItemType Directory -Force -Path "libxl/include_cpp" | Out-Null
-          New-Item -ItemType Directory -Force -Path "libxl/lib64" | Out-Null
-          New-Item -ItemType Directory -Force -Path "libxl/bin" | Out-Null
-          Write-Host "libxl placeholder directories created"
-          Write-Host "NOTE: Place your libxl files manually or use paid version"
+          New-Item -ItemType Directory -Force -Path "libxl\include_cpp" | Out-Null
+          New-Item -ItemType Directory -Force -Path "libxl\lib64" | Out-Null
+          New-Item -ItemType Directory -Force -Path "libxl\bin" | Out-Null
+          Write-Host "libxl directories created"
 
       - name: Prepare pro file
-        shell: pwsh
         run: |
           $pro = @'
 QT += quick quickcontrols2
 CONFIG += c++20 utf8_source
-RC_ICONS = main.ico
-INCLUDEPATH += $$PWD/libxl/include_cpp
+INCLUDEPATH += $${PWD}/libxl/include_cpp
 LIBS += $$PWD/libxl/lib64/libxl.lib
 INCLUDEPATH += $$PWD/minidocx/include
 LIBS += -L$$PWD/minidocx/lib -llibminidocx
@@ -59,42 +53,39 @@ HEADERS += common.h cservicebackend.h minidocx/include/minidocx.hpp orderedmap.h
 DISTFILES += minidocx/lib/libminidocx.a
 '@
           Set-Content -Path "TestPaperDemo1.pro" -Value $pro -Encoding UTF8
+          Get-Content "TestPaperDemo1.pro" | Select -First 5
 
-      - name: Build
-        shell: pwsh
+      - name: Build with qmake
         run: |
-          $env:PATH = "C:\Qt\Tools\mingw730_64\bin;C:\Qt\5.15.2\mingw73_64\bin;$env:PATH"
-          $env:QTDIR = "C:\Qt\5.15.2\mingw73_64"
-          $env:PATH = "$env:QTDIR\bin;" + $env:PATH
-          $env:QMAKE = "C:\Qt\5.15.2\mingw73_64\bin\qmake.exe"
+          $qtDir = "C:\tools\qt\Qt5.15.2\5.15.2\mingw73_64"
+          $env:PATH = "$qtDir\bin;$env:PATH"
+          $env:QTDIR = $qtDir
+          $env:QMAKE = "$qtDir\bin\qmake.exe"
+          Write-Host "QMAKE=$env:QMAKE"
           & qmake TestPaperDemo1.pro -spec win32-g++ "CONFIG+=release"
           & mingw32-make -j4
 
-      - name: Copy runtime
-        shell: pwsh
+      - name: Copy runtime DLLs
         run: |
-          $dlls = @(
-            "libgcc_s_seh-1.dll","libstdc++-6.dll","libwinpthread-1.dll",
-            "Qt5Core.dll","Qt5Gui.dll","Qt5Quick.dll","Qt5QuickControls2.dll",
-            "Qt5Qml.dll","Qt5QmlModels.dll","libminidocx.dll"
-          )
-          $src = "C:\Qt\5.15.2\mingw73_64\bin"
-          $dest = "release"
+          $qtDir = "C:\tools\qt\Qt5.15.2\5.15.2\mingw73_64"
+          $dlls = @("libgcc_s_seh-1.dll","libstdc++-6.dll","libwinpthread-1.dll",
+                    "Qt5Core.dll","Qt5Gui.dll","Qt5Quick.dll","Qt5QuickControls2.dll",
+                    "Qt5Qml.dll","Qt5QmlModels.dll","libminidocx.dll")
           foreach ($dll in $dlls) {
-            if (Test-Path "$src\$dll") { Copy-Item "$src\$dll" -Destination $dest -Force }
+            $src = "$qtDir\bin\$dll"
+            if (Test-Path $src) { Copy-Item $src -Destination release -Force }
           }
-          if (Test-Path "libxl\bin\libxl.dll") { Copy-Item "libxl\bin\libxl.dll" -Destination $dest -Force }
-          $pluginDirs = @("platforms","controls","layouts")
-          foreach ($dir in $pluginDirs) {
-            $sp = "C:\Qt\5.15.2\mingw73_64\plugins\$dir"
+          if (Test-Path "libxl\bin\libxl.dll") { Copy-Item "libxl\bin\libxl.dll" -Destination release -Force }
+          foreach ($dir in @("platforms","controls","layouts")) {
+            $sp = "$qtDir\plugins\$dir"
             if (Test-Path $sp) {
-              $dp = "$dest\plugins\$dir"
+              $dp = "release\plugins\$dir"
               New-Item -ItemType Directory -Force -Path $dp | Out-Null
               Copy-Item "$sp\*" -Destination $dp -Force -Recurse
             }
           }
 
-      - name: Upload artifact
+      - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
           name: TestPaperGenerator-Windows
