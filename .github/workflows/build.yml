@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: windows-latest
@@ -21,129 +24,73 @@ jobs:
           modules: 'qtquick2 qtquickcontrols2'
           tools: 'qt.tools.mingw730'
 
-      - name: Setup MinGW environment
+      - name: Setup MinGW
         shell: pwsh
         run: |
           $env:PATH = "C:\Qt\Tools\mingw730_64\bin;C:\Qt\5.15.2\mingw73_64\bin;$env:PATH"
           $env:QTDIR = "C:\Qt\5.15.2\mingw73_64"
-          $env:PATH += ";$env:QTDIR\bin"
-          [System.Environment]::SetEnvironmentVariable("PATH", $env:PATH, "Process")
+          $env:PATH = "$env:QTDIR\bin;" + $env:PATH
           gcc --version
 
-      - name: Download libxl
+      - name: Create libxl placeholders
         shell: pwsh
         run: |
-          # Download libxl (requires registration at libxl.com)
-          # This is a placeholder - user needs to download libxl manually
-          # and place it in the libxl/ directory, or use the paid version
-          Write-Host "NOTE: libxl requires manual download from https://www.libxl.com/"
-          Write-Host "Download libxl for C++ and place files as follows:"
-          Write-Host "  libxl/include_cpp/libxl.h -> libxl/include_cpp/libxl.h"
-          Write-Host "  libxl/lib64/libxl.lib   -> libxl/lib64/libxl.lib"
-          Write-Host "  libxl/bin/libxl.dll     -> libxl/bin/libxl.dll"
-          
-          # Create placeholder structure
           New-Item -ItemType Directory -Force -Path "libxl/include_cpp" | Out-Null
           New-Item -ItemType Directory -Force -Path "libxl/lib64" | Out-Null
           New-Item -ItemType Directory -Force -Path "libxl/bin" | Out-Null
+          Write-Host "libxl placeholder directories created"
+          Write-Host "NOTE: Place your libxl files manually or use paid version"
 
       - name: Prepare pro file
         shell: pwsh
         run: |
-          # Create a modified pro file with relative paths
-          $content = @'
+          $pro = @'
 QT += quick quickcontrols2
-
-CONFIG += c++20
-CONFIG += utf8_source
-
+CONFIG += c++20 utf8_source
 RC_ICONS = main.ico
-
-# libxl - 使用相对路径
 INCLUDEPATH += $$PWD/libxl/include_cpp
 LIBS += $$PWD/libxl/lib64/libxl.lib
-
-# minidocx
 INCLUDEPATH += $$PWD/minidocx/include
 LIBS += -L$$PWD/minidocx/lib -llibminidocx
-
 DEFINES += QT_DEPRECATED_WARNINGS
-
-SOURCES += \
-        cservicebackend.cpp \
-        main.cpp \
-        orderedmap.cpp \
-        tablemodel.cpp
-
+SOURCES += cservicebackend.cpp main.cpp orderedmap.cpp tablemodel.cpp
 RESOURCES += qml.qrc
-
-QML_IMPORT_PATH =
-QML_DESIGNER_IMPORT_PATH =
-
-qnx: target.path = /tmp/$${TARGET}/bin
-else: unix:!android: target.path = /opt/$${TARGET}/bin
-!isEmpty(target.path): INSTALLS += target
-
-DISTFILES += \
-    minidocx/lib/libminidocx.a
-
-HEADERS += \
-    common.h \
-    cservicebackend.h \
-    minidocx/include/minidocx.hpp \
-    orderedmap.h \
-    tablemodel.h
+HEADERS += common.h cservicebackend.h minidocx/include/minidocx.hpp orderedmap.h tablemodel.h
+DISTFILES += minidocx/lib/libminidocx.a
 '@
-          Set-Content -Path "TestPaperDemo1.pro" -Value $content -Encoding UTF8
+          Set-Content -Path "TestPaperDemo1.pro" -Value $pro -Encoding UTF8
 
-      - name: Build with qmake
+      - name: Build
         shell: pwsh
         run: |
           $env:PATH = "C:\Qt\Tools\mingw730_64\bin;C:\Qt\5.15.2\mingw73_64\bin;$env:PATH"
           $env:QTDIR = "C:\Qt\5.15.2\mingw73_64"
-          $env:PATH += ";$env:QTDIR\bin"
+          $env:PATH = "$env:QTDIR\bin;" + $env:PATH
           $env:QMAKE = "C:\Qt\5.15.2\mingw73_64\bin\qmake.exe"
-          
           & qmake TestPaperDemo1.pro -spec win32-g++ "CONFIG+=release"
           & mingw32-make -j4
 
-      - name: Copy runtime dependencies
+      - name: Copy runtime
         shell: pwsh
         run: |
           $dlls = @(
-            "libgcc_s_seh-1.dll",
-            "libstdc++-6.dll",
-            "libwinpthread-1.dll",
-            "Qt5Core.dll",
-            "Qt5Gui.dll",
-            "Qt5Quick.dll",
-            "Qt5QuickControls2.dll",
-            "Qt5Qml.dll",
-            "Qt5QmlModels.dll",
-            "libminidocx.dll"
+            "libgcc_s_seh-1.dll","libstdc++-6.dll","libwinpthread-1.dll",
+            "Qt5Core.dll","Qt5Gui.dll","Qt5Quick.dll","Qt5QuickControls2.dll",
+            "Qt5Qml.dll","Qt5QmlModels.dll","libminidocx.dll"
           )
           $src = "C:\Qt\5.15.2\mingw73_64\bin"
           $dest = "release"
-          
           foreach ($dll in $dlls) {
-            if (Test-Path "$src\$dll") {
-              Copy-Item "$src\$dll" -Destination $dest -Force
-            }
+            if (Test-Path "$src\$dll") { Copy-Item "$src\$dll" -Destination $dest -Force }
           }
-          
-          # Copy libxl.dll if exists
-          if (Test-Path "libxl\bin\libxl.dll") {
-            Copy-Item "libxl\bin\libxl.dll" -Destination $dest -Force
-          }
-          
-          # Copy Qt plugins
-          $pluginDirs = @("platforms", "controls", "layouts")
+          if (Test-Path "libxl\bin\libxl.dll") { Copy-Item "libxl\bin\libxl.dll" -Destination $dest -Force }
+          $pluginDirs = @("platforms","controls","layouts")
           foreach ($dir in $pluginDirs) {
-            $srcPath = "C:\Qt\5.15.2\mingw73_64\plugins\$dir"
-            if (Test-Path $srcPath) {
-              $destPath = "$dest\plugins\$dir"
-              New-Item -ItemType Directory -Force -Path $destPath | Out-Null
-              Copy-Item "$srcPath\*" -Destination $destPath -Force -Recurse
+            $sp = "C:\Qt\5.15.2\mingw73_64\plugins\$dir"
+            if (Test-Path $sp) {
+              $dp = "$dest\plugins\$dir"
+              New-Item -ItemType Directory -Force -Path $dp | Out-Null
+              Copy-Item "$sp\*" -Destination $dp -Force -Recurse
             }
           }
 
@@ -153,10 +100,3 @@ HEADERS += \
           name: TestPaperGenerator-Windows
           path: release/*.exe
           retention-days: 30
-
-      - name: Upload full release folder
-        uses: actions/upload-artifact@v4
-        with:
-          name: TestPaperGenerator-Release-Full
-          path: release/
-          retention-days: 7
