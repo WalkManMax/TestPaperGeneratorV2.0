@@ -6,33 +6,84 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install Python and aqtinstall
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq mingw-w64 cmake
+          choco install python -y --no-progress
+          refreshenv
+          pip install aqtinstall
 
-      - name: Build with MXE
+      - name: Install Qt5
         run: |
-          docker pull mxe/mxe:latest || true
-          docker run --rm -v "${{ github.workspace }}:/src" mxe/mxe:latest \
-            sh -c "cd /src && \
-              x86_64-w64-mingw32.static-qmake-qt5 TestPaperDemo1.pro -spec linux-g++ -o Makefile && \
-              x86_64-w64-mingw32.static-make -j$(nproc) || true"
+          aqt install-qt windows desktop 5.15.2 win64_mingw73 -O C:\Qt
+          Write-Host "Qt installed successfully"
 
-      - name: Create release package
+      - name: Setup environment
         run: |
-          mkdir -p release
-          find . -name "*.exe" -type f 2>/dev/null | head -5
+          $env:QtDir = "C:\Qt\5.15.2\mingw73_64"
+          $env:PATH = "$env:QtDir\bin;C:\Qt\Tools\mingw730_64\bin;$env:PATH"
+          $env:QTDIR = $env:QtDir
+          gcc --version
+          qmake --version
+
+      - name: Create libxl directories
+        run: |
+          New-Item -ItemType Directory -Force -Path "libxl\include_cpp" | Out-Null
+          New-Item -ItemType Directory -Force -Path "libxl\lib64" | Out-Null
+          New-Item -ItemType Directory -Force -Path "libxl\bin" | Out-Null
+
+      - name: Create pro file
+        run: |
+          $pro = @'
+QT += quick quickcontrols2
+CONFIG += c++20 utf8_source
+INCLUDEPATH += $$PWD/libxl/include_cpp
+LIBS += $$PWD/libxl/lib64/libxl.lib
+INCLUDEPATH += $$PWD/minidocx/include
+LIBS += -L$$PWD/minidocx/lib -llibminidocx
+DEFINES += QT_DEPRECATED_WARNINGS
+SOURCES += cservicebackend.cpp main.cpp orderedmap.cpp tablemodel.cpp
+RESOURCES += qml.qrc
+HEADERS += common.h cservicebackend.h minidocx/include/minidocx.hpp orderedmap.h tablemodel.h
+DISTFILES += minidocx/lib/libminidocx.a
+'@
+          Set-Content -Path "TestPaperDemo1.pro" -Value $pro -Encoding UTF8
+
+      - name: Build
+        run: |
+          $env:QtDir = "C:\Qt\5.15.2\mingw73_64"
+          $env:PATH = "$env:QtDir\bin;C:\Qt\Tools\mingw730_64\bin;$env:PATH"
+          $env:QTDIR = $env:QtDir
+          & qmake TestPaperDemo1.pro -spec win32-g++ "CONFIG+=release"
+          & mingw32-make -j4
+
+      - name: Copy runtime DLLs
+        run: |
+          $env:QtDir = "C:\Qt\5.15.2\mingw73_64"
+          $dlls = @("libgcc_s_seh-1.dll","libstdc++-6.dll","libwinpthread-1.dll",
+                    "Qt5Core.dll","Qt5Gui.dll","Qt5Quick.dll","Qt5QuickControls2.dll",
+                    "Qt5Qml.dll","Qt5QmlModels.dll","libminidocx.dll")
+          foreach ($dll in $dlls) {
+            $src = "$env:QtDir\bin\$dll"
+            if (Test-Path $src) { Copy-Item $src -Destination release -Force }
+          }
+          if (Test-Path "libxl\bin\libxl.dll") { Copy-Item "libxl\bin\libxl.dll" -Destination release -Force }
+          foreach ($dir in @("platforms","controls","layouts")) {
+            $sp = "$env:QtDir\plugins\$dir"
+            if (Test-Path $sp) {
+              $dp = "release\plugins\$dir"
+              New-Item -ItemType Directory -Force -Path $dp | Out-Null
+              Copy-Item "$sp\*" -Destination $dp -Force -Recurse
+            }
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: TestPaperGenerator-Windows
           path: release/*.exe
