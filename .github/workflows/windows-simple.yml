@@ -1,0 +1,37 @@
+name: Windows Build (Simple)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test shell
+        run: |
+          Write-Host "Test step 1"
+          Write-Host "PATH=$env:PATH"
+
+      - name: Install Python
+        run: choco install python -y --no-progress
+
+      - name: Verify Python
+        run: python --version
+
+      - name: Install aqtinstall
+        run: pip install aqtinstall
+
+      - name: Install Qt
+        run: aqt install-qt windows desktop 5.15.2 win64_mingw73 -O C:\Qt
+
+      - name: Build
+        run: |
+          $env:QtDir = "C:\Qt\5.15.2\mingw73_64"
+          $env:PATH = "$env:QtDir\bin;C:\Qt\Tools\mingw730_64\bin;$env:PATH"
+          qmake --version
+          gcc --version
